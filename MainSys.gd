@@ -6,8 +6,9 @@ extends Control
 @onready var off_timer: Timer = $Controls/OffTimer
 @onready var letter_label: RichTextLabel = $Text/LetterLabel
 @onready var feedback: AudioStreamPlayer = $Controls/Feedback
-@onready var click_timer_progress: RadialProgress = $Controls/ClickTimerProgress # FROM "RADIAL PROGRESS" ON ASSETLIB
-@onready var off_timer_progress: RadialProgress = $Controls/OffTimerProgress # FROM "RADIAL PROGRESS" ON ASSETLIB
+@onready var click_timer_progress: RadialProgress = $Controls/ClickTimerProgress
+@onready var off_timer_progress: RadialProgress = $Controls/OffTimerProgress
+@onready var feedback_2: AudioStreamPlayer = $Controls/Feedback2
 
 # === LETTER/CHARACTER VARIABLES ===
 var letter_history:String
@@ -20,14 +21,20 @@ var text_finished:bool = false
 
 # === AUDIO VARIABLES ===
 var playback: AudioStreamGeneratorPlayback
+var playback2: AudioStreamGeneratorPlayback
 var is_beeping:bool = false
+var is_beeping2:bool = false
 var phase:float = 0.0
 var phase_increment:float = 0.0
+var phase2:float = 0.0
+var phase_increment2:float = 0.0
 
 # === AUDIO CONSTANTS ===
 const FREQUENCY:float = 600.0
 const VOLUME:float = 0.5
 const SAMPLE_RATE:int = 11025
+
+const FREQUENCY2:float = 400.0
 
 # Full morse code dictionary
 var character_dict:Dictionary = {".-"="A","-..."="B",
@@ -44,23 +51,43 @@ var character_dict:Dictionary = {".-"="A","-..."="B",
 func _ready() -> void:
 	letter_label.text = ""
 	morse_text_label.text = ""
-	phase_increment = 2.0 * PI * FREQUENCY/SAMPLE_RATE
-	feedback.play()
+	phase_increment = 2.0 * PI * FREQUENCY/SAMPLE_RATE # Clicker beep phase
+	phase_increment2 = 2.0 * PI * FREQUENCY2/SAMPLE_RATE # Add "K" button beep phase (+ space in text)
+	feedback.play() # Beep always plays, but it holds the frames which it plays on
 	playback = feedback.get_stream_playback()
-
+	feedback_2.play()
+	playback2 = feedback_2.get_stream_playback()
+# Interestingly enough, the audio generation function isn't too hard on the processor at all
+# In fact, it's only slightly harder on the processor than playing an mp3/wav/ogg file
+# I thought it would be neat to have real time audio generation rather than a sound file
+# Although, you may hear crackling in the audio, which is an inherent flaw here
+# There are definitely ways to fix this, and I will implement them in the future
+# But for now, I'm setting both audio gen nodes to different processor threads to smooth it out
 
 func _process(delta: float) -> void:
-	if not is_beeping:
-		return
-	var samples_to_push:int = int(delta*SAMPLE_RATE)
-	samples_to_push = clamp(samples_to_push,1,4096) # Caps samples
-	for i in range(samples_to_push):
-		if playback.can_push_buffer(1):
-			var sample_value:float = sin(phase) * VOLUME
-			playback.push_frame(Vector2(sample_value,sample_value))
-			phase += phase_increment
-			if phase >= 2.0 * PI:
-				phase -= 2.0 * PI
+	if is_beeping: # Processes first beep tone (for adding letters/characters)
+		var samples_to_push:int = int(delta*SAMPLE_RATE)
+		samples_to_push = clamp(samples_to_push,1,4096) # Caps samples
+		for i in range(samples_to_push):
+			if playback.can_push_buffer(1):
+				var sample_value:float = sin(phase) * VOLUME
+				playback.push_frame(Vector2(sample_value,sample_value))
+				phase += phase_increment
+				if phase >= 2.0 * PI:
+					phase -= 2.0 * PI
+	
+	
+	if is_beeping2: # Processes second beep tone (for adding spaces in text)
+		var samples_to_push2: int = int(delta*SAMPLE_RATE)
+		samples_to_push2 = clamp(samples_to_push2,1,4096)
+		for i in range(samples_to_push2):
+			if playback2.can_push_buffer(1):
+				var sample_value2:float = sin(phase2) * VOLUME
+				playback2.push_frame(Vector2(sample_value2,sample_value2))
+				phase2 += phase_increment2
+				if phase2 >= 2.0 * PI:
+					phase2 -= 2.0 * PI
+			
 
 # Handles beeping sound gen
 func start_beep():
@@ -68,6 +95,12 @@ func start_beep():
 	phase = 0.0
 func stop_beep():
 	is_beeping = false
+# Handles space beep sound gen
+func start_beep2():
+	is_beeping2 = true
+	phase2 = 0.0
+func stop_beep2():
+	is_beeping2 = false
 
 # Clears the character history and morse label text for new character entry
 func clear_character():
@@ -80,10 +113,17 @@ func _on_click_timer_timeout() -> void:
 
 # Handles click button up/down press (just a shortcut for space bar)
 func _input(event: InputEvent) -> void:
-	if event.is_action_pressed("click"):
+	if event.is_action_pressed("click"): # When space button is pressed down
 		_on_clicker_button_down()
-	if event.is_action_released("click"):
+	if event.is_action_released("click"): # When space button is released
 		_on_clicker_button_up()
+	if event.is_action_pressed("space"): # "K" key adds a space. Will add a visual/audible marker in the future
+		start_beep2()
+		letter_history += " "
+	if event.is_action_released("space"):
+		stop_beep2()
+	if event.is_action_pressed("clear"): # "C" key does the same thing as the clear button; clears text
+		clear_text()
 
 # When click button is pressed
 func _on_clicker_button_down() -> void:
